@@ -20,7 +20,7 @@ def parse_args():
                         help='model path')
     parser.add_argument('--data', type=str, default='data/', metavar='N',
                         help='original dataset')
-    parser.add_argument('--steps', type=int, default=35, metavar='N',
+    parser.add_argument('--steps', type=int, default=10, metavar='N',
                         help='number of steps in interpolation')
     args = parser.parse_args()
     return args
@@ -43,9 +43,10 @@ def get_conditional(obj_shape, obj_size):
 def get_trajectory(idx_src, idx_dst, steps=35, obj_type=3, obj_size=1.0):
     trajectory = np.empty((0, 9))
     t = np.linspace(0, 1, steps)
-    #print("t: ", t)
-
-    print (labels[idx_src])
+    
+    
+    print(idx_src)
+    # print (labels[idx_src])
     # print (object_type[idx_src])
     # print (object_size[idx_src])
     # print (object_type[idx_dst])
@@ -55,17 +56,77 @@ def get_trajectory(idx_src, idx_dst, steps=35, obj_type=3, obj_size=1.0):
     #     cond_size -= 0.5
     # elif object_size[idx_dst] == -1.0:
     #     cond_size -= 1.0
-
-    print (cond_size)
-    print ('\n')
+    # print('latent source',X_lat[idx_src])
+    # print('\n')
+    # print('latent end',X_lat[idx_dst])
+    # print('\n')
+    # print (cond_size)
+    # print ('\n')
     conditional = torch.cat((object_type[idx_src], cond_size), dim=-1)
+    possible_grasps, possible_lat = remove_unwanted_objects(idx_src)
+    print('    possible grasps ', len(possible_grasps), '\n')
+    print(possible_grasps)
 
     for j in range(steps):
+
         lat = get_lininter(X_lat[idx_src], X_lat[idx_dst], t[j])
         inter_grasp = cvae_model.decode(lat, conditional).detach()            
         trajectory = np.vstack([trajectory, inter_grasp.numpy().astype('float64')])
-
+        
+    dist = 0
+    steps_taken = 0
+    # there are len(possible grasps) paths that we can take
+    for i in range(len(possible_grasps)):
+        dist = 0
+        initial_pos = np.where(possible_grasps[:,2]==idx_src)
+        initial_lat = torch.flatten(possible_lat[initial_pos])
+        
+        initial_grasp = cvae_model.decode(initial_lat, conditional).detach()  
+        #there are len(possible grasps) a path can diverge
+        for j in range(len(possible_grasps)):
+            if possible_grasps[j-1][2] == initial_pos:  #went back to origin or looped to origi
+                dist = 1e25
+                steps_taken = 0
+                print('skipping this step\n')
+                continue
+            
+            next_lat = torch.flatten(possible_lat[j])
+            steps_taken = steps_taken+1
+            
+            next_grasp = cvae_model.decode(next_lat, conditional).detach()
+            dist = abs(next_grasp-initial_grasp)
+            
+            
+            
+            
+        
+        a=1
+        
+            
+        
     return trajectory
+
+    
+
+def remove_unwanted_objects(idx_src):
+    desired_object = labels[idx_src][0]
+    print('desired object', desired_object)
+    
+    flatten_label = np.delete(labels,1,axis=1)
+    
+    unwanted_indexes = np.where(flatten_label != desired_object)
+    wanted_indexes = np.where(flatten_label == desired_object)
+    wanted_indexes = wanted_indexes[0].T.reshape(len(wanted_indexes[0]),1)
+    
+    grasps_touse = np.delete(labels,unwanted_indexes[0],axis=0)
+    grasps_touse = np.append(grasps_touse, wanted_indexes,axis=1)
+    lat_touse = np.delete(X_lat.detach().numpy(),unwanted_indexes[0],axis=0)
+    grasps_touse_tensor = torch.from_numpy(grasps_touse).float()
+    lat_touse_tensor = torch.from_numpy(lat_touse).float()
+    
+
+    
+    return grasps_touse_tensor, lat_touse_tensor
 
 args = parse_args()
 n_steps = args.steps
@@ -79,7 +140,6 @@ grasps, grasp_type, object_type, object_size = annotate_grasps(grasps, labels)
 
 # To torch tensors
 grasps = torch.from_numpy(grasps).float()
-grasps_tosee = grasps.numpy()
 object_size = torch.from_numpy(object_size).float().unsqueeze(-1)
 object_type = torch.from_numpy(object_type).float()
 # One hot encoding
@@ -90,22 +150,17 @@ y = torch.cat((object_type, object_size), dim=-1)
 cvae_model = get_CVAE(args.model) 
 recon_grasps, X_lat, _ = cvae_model(grasps, y)
 
+X_lat_toread = X_lat.detach().numpy()
+
 trajectories = np.empty((0, n_steps, 9))
 
-
 pairs = np.load('data/final_pairs.npy')
-traj_cost = np.empty(len(pairs))
 print (f'Generating {len(pairs)} pairs!')
 # pairs = np.load('pairs_test.npy')
-pair_index = 0
 
 for p in pairs:
-    #print("p:", p)
     traj = get_trajectory(p[0], p[1], n_steps)
-    #print("traj: ", traj)
     trajectories = np.vstack([trajectories, np.expand_dims(traj, axis=0)])
-    traj_cost[pair_index] = np.sum(traj)
-    pair_index += 1
 
 grasp_idxs = np.asarray(pairs)
 model_name = args.model.split('/')[-1]
