@@ -41,7 +41,7 @@ def get_conditional(obj_shape, obj_size):
     return conditional
 
 def get_trajectory(idx_src, idx_dst, steps=35, obj_type=3, obj_size=1.0):
-    trajectory = np.empty((0, 9))
+    trajectory = np.empty((0, 9)) #each step has 9 dimensions
     t = np.linspace(0, 1, steps)
     
     
@@ -65,48 +65,86 @@ def get_trajectory(idx_src, idx_dst, steps=35, obj_type=3, obj_size=1.0):
     conditional = torch.cat((object_type[idx_src], cond_size), dim=-1)
     possible_grasps, possible_lat = remove_unwanted_objects(idx_src)
     print('    possible grasps ', len(possible_grasps), '\n')
-    print(possible_grasps)
+    #print(possible_grasps)
 
-    for j in range(steps):
 
-        lat = get_lininter(X_lat[idx_src], X_lat[idx_dst], t[j])
-        inter_grasp = cvae_model.decode(lat, conditional).detach()            
-        trajectory = np.vstack([trajectory, inter_grasp.numpy().astype('float64')])
-        
-    dist = 0
-    steps_taken = 0
-    # there are len(possible grasps) paths that we can take
-    for i in range(len(possible_grasps)):
-        dist = 0
-        initial_pos = np.where(possible_grasps[:,2]==idx_src)
-        initial_lat = torch.flatten(possible_lat[initial_pos])
-        
-        initial_grasp = cvae_model.decode(initial_lat, conditional).detach()  
-        #there are len(possible grasps) a path can diverge
-        for j in range(len(possible_grasps)):
-            if possible_grasps[j-1][2] == initial_pos:  #went back to origin or looped to origi
-                dist = 1e25
-                steps_taken = 0
-                print('skipping this step\n')
-                continue
-            
-            next_lat = torch.flatten(possible_lat[j])
-            steps_taken = steps_taken+1
-            
-            next_grasp = cvae_model.decode(next_lat, conditional).detach()
-            dist = abs(next_grasp-initial_grasp)
-            
-            
-            
-            
-        
-        a=1
-        
-            
-        
-    return trajectory
-
+    # Define your starting and ending points in the latent space
+    start_latent_point = possible_lat[idx_src-possible_grasps[0][2].long()]  # Replace with your actual starting point
+    end_latent_point = possible_lat[idx_dst-possible_grasps[0][2].long()] # Replace with your actual ending point
+    print("start points", start_latent_point, "\n")
+    print("end points",end_latent_point, "\n")
     
+    visited_latent_points = set()  # To keep track of visited latent points
+    current_latent_point = start_latent_point  # Initialize the current point
+    
+    path = cvae_model.decode(current_latent_point, conditional).detach()      # Initialize the path with the starting point
+    trajectory = np.vstack([trajectory, path.numpy().astype('float64')])
+    
+    
+    while not torch.equal(current_latent_point, end_latent_point):
+        # Find the nearest unvisited neighbor
+        nearest_neighbor = None
+        min_distance = 1e10
+    
+        for candidate_point in possible_lat:
+            
+            # Need to use numpy arrays to correctly use loops because tensors are not suitable for sets.....
+            #print("candidate: ",candidate_point, "\n")
+            candidate_point_np = candidate_point.numpy()
+            
+            
+            if not any(np.array_equal(candidate_point_np, point.numpy()) for point in visited_latent_points):
+                distance = calculate_distance(candidate_point, current_latent_point,conditional)
+                if distance < min_distance:
+                    min_distance = distance
+                    nearest_neighbor = candidate_point
+                    #print("new nearest neighbour: ", nearest_neighbor, "\n")
+        
+        # Update the current point and add it to the path
+        current_latent_point = nearest_neighbor
+        real_current_toadd = cvae_model.decode(current_latent_point, conditional).detach() 
+        trajectory = np.vstack([trajectory, real_current_toadd.numpy().astype('float64')])
+    
+        # Mark the current point as visited
+        visited_latent_points.add(current_latent_point)
+
+# At this point, 'path' contains the path of latent points from start to end
+    # for j in range(steps):
+
+    #     lat = get_lininter(X_lat[idx_src], X_lat[idx_dst], t[j])
+    #     inter_grasp = cvae_model.decode(lat, conditional).detach()            
+    #     trajectory = np.vstack([trajectory, inter_grasp.numpy().astype('float64')])
+        
+        
+    dist = np.zeros(len(trajectory[1]))
+    for i in range(len(trajectory[1])):
+        for j in range(len(trajectory)-1):
+            dist[i] += np.sqrt((trajectory[j][i] - trajectory[j+1][i])**2)
+    
+    
+    dist_total = np.sum(dist)
+                        
+    print("pathing distances on each dimension")
+    print(dist)
+    print("\n")
+    print("total path distance")
+    print(dist_total)
+    print("\n")
+    
+    return trajectory,dist_total
+
+def calculate_distance(candidate_point, current_latent_point,conditional):
+    
+    real_candidate = cvae_model.decode(candidate_point, conditional).detach()
+    real_current = cvae_model.decode(current_latent_point, conditional).detach()
+    
+    # Calculate the squared differences in each dimension
+    squared_diff = (real_candidate.sum() - real_current.sum()) ** 2
+    
+    # Sum the squared differences and take the square root
+    distance = np.sqrt((squared_diff))
+    
+    return distance
 
 def remove_unwanted_objects(idx_src):
     desired_object = labels[idx_src][0]
@@ -152,15 +190,17 @@ recon_grasps, X_lat, _ = cvae_model(grasps, y)
 
 X_lat_toread = X_lat.detach().numpy()
 
-trajectories = np.empty((0, n_steps, 9))
+trajectories = list()
 
 pairs = np.load('data/final_pairs.npy')
 print (f'Generating {len(pairs)} pairs!')
 # pairs = np.load('pairs_test.npy')
 
 for p in pairs:
-    traj = get_trajectory(p[0], p[1], n_steps)
-    trajectories = np.vstack([trajectories, np.expand_dims(traj, axis=0)])
+    traj,total_dist = get_trajectory(p[0], p[1])
+    trajectories.append((traj,total_dist))
+    
+    
 
 grasp_idxs = np.asarray(pairs)
 model_name = args.model.split('/')[-1]

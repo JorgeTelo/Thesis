@@ -118,7 +118,7 @@ def save_trajectories(indices, trajectories, model_name, n_steps,
     trajectories_filename += "_object_configuration_" + str(object_configuration)
 
     np.save(indices_filename, indices.astype('float64'))
-    np.save(trajectories_filename, trajectories.astype('float64'))
+    np.save(trajectories_filename, trajectories)
     
     
 

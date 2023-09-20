@@ -16,7 +16,7 @@ from utils import one_hot
 from cvae import CVAE
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Train AE for Shadow Hand')
+    parser = argparse.ArgumentParser(description='Train AE for ICUB')
     parser.add_argument('--epochs', type=int, default=100, metavar='N',
                         help='number of epochs to train (default: 10)')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
