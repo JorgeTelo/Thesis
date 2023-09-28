@@ -205,7 +205,7 @@ def get_grasps_with_object_sizes_and_types_idxs(grasps, labels):
     print ("Loaded ", grasps.shape[0], " grasps!")
     return grasps, grasp_type, object_type, object_size, idxs
 
-def load_data(direc, robot='icub'):
+def load_data(direc, robot='shadow'):
     """
     Load dataset of grasp postures and corresponding grasp types
     from mat files.
