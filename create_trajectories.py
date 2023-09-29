@@ -1,5 +1,6 @@
 from itertools import combinations
 import argparse
+import matplotlib.pyplot as plt
 
 import torch
 from torch.autograd import Variable
@@ -120,7 +121,7 @@ def get_trajectory(idx_src, idx_dst, steps=35, obj_type=3, obj_size=1.0):
                         #print("end and neighbor are equals, priority set to 100")
                     else:
                     # Calculate the priority (f = a*g + b*h), a>b = prios direct pathing, b>a prios non direct
-                        priority = 0.2*tentative_distance + 1.2*heuristic(neighbor, end_latent_point,conditional)
+                        priority = 0.5*tentative_distance + 1*heuristic(neighbor, end_latent_point,conditional)
                         #print("end and neighbor are different, adding ", priority, "prio")
                     # Enqueue the neighbor with its priority
                     heapq.heappush(priority_queue, (priority, tuple(neighbor)))
@@ -213,6 +214,16 @@ def get_trajectory(idx_src, idx_dst, steps=35, obj_type=3, obj_size=1.0):
     # print(dist_total/len(trajectory))
     # print("\n")
     
+    # Plot the latent space in a scatter plot
+    plt.figure(figsize=(8, 6))
+    plt.scatter(X_lat_toread[:, 0], X_lat_toread[:, 1], c='b', marker='o', s=10)
+    plt.title('2D Latent Space')
+    plt.xlabel('Latent Dimension 1')
+    plt.ylabel('Latent Dimension 2')
+    plt.plot(shortest_path_latent[:, 0], shortest_path_latent[:, 1], c='r', marker='o', linestyle='-')
+    plt.grid(True)
+    plt.show()
+    
     return shortest_path, dist_total
 
 # Define heuristic function (Euclidean distance)
@@ -265,6 +276,7 @@ grasps, grasp_type, object_type, object_size = annotate_grasps(grasps, labels)
 
 # To torch tensors
 grasps = torch.from_numpy(grasps).float()
+grasps_toread = grasps.detach().numpy()
 object_size = torch.from_numpy(object_size).float().unsqueeze(-1)
 object_type = torch.from_numpy(object_type).float()
 # One hot encoding
@@ -276,6 +288,7 @@ cvae_model = get_CVAE(args.model)
 recon_grasps, X_lat, _ = cvae_model(grasps, y)
 
 X_lat_toread = X_lat.detach().numpy()
+
 
 trajectories = list()
 

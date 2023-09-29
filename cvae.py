@@ -5,7 +5,7 @@ from torchvision import datasets, transforms
 from torchvision.utils import save_image
 
 class CVAE(nn.Module):
-    def __init__(self, in_dim=21, hid_dim=64, lat_dim=2, c_dim=8):
+    def __init__(self, in_dim=9, hid_dim=64, lat_dim=2, c_dim=4):
         super(CVAE, self).__init__()
 
         self.input_shape = in_dim
