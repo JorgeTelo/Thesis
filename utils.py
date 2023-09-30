@@ -87,7 +87,7 @@ def get_CVAE(cvae_file):
     state = torch.load(filename)
     layers = state['layers']
     cvae = CVAE(in_dim = layers[0], hid_dim = layers[1], lat_dim = layers[2],
-            c_dim = layers[3])
+            c_dim = layers[3], metric_dim = layers[4])
     cvae.load_state_dict(state['state_dict'])
     return cvae
 
@@ -116,6 +116,11 @@ def save_trajectories(indices, trajectories, model_name, n_steps,
     trajectories_filename += model_name
     trajectories_filename += "_steps_" + str(n_steps)
     trajectories_filename += "_object_configuration_" + str(object_configuration)
+    
+
 
     np.save(indices_filename, indices.astype('float64'))
-    np.save(trajectories_filename, trajectories.astype('float64'))
+    np.save(trajectories_filename, trajectories)
+    
+    
+

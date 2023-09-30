@@ -1,15 +1,19 @@
 from itertools import combinations
 import argparse
+import matplotlib.pyplot as plt
 
 import torch
 from torch.autograd import Variable
 import numpy as np
 import scipy.misc
 import scipy.io as sio
+import heapq
 
 from cvae import CVAE
 from utils import one_hot, get_lininter, get_CVAE, save_trajectories
 from data_loader import load_data, annotate_grasps
+from sklearn.decomposition import PCA
+from scipy.spatial.distance import pdist, squareform
 
 import random 
 random.seed(0)
@@ -20,7 +24,7 @@ def parse_args():
                         help='model path')
     parser.add_argument('--data', type=str, default='data/', metavar='N',
                         help='original dataset')
-    parser.add_argument('--steps', type=int, default=35, metavar='N',
+    parser.add_argument('--steps', type=int, default=10, metavar='N',
                         help='number of steps in interpolation')
     args = parser.parse_args()
     return args
@@ -41,11 +45,13 @@ def get_conditional(obj_shape, obj_size):
     return conditional
 
 def get_trajectory(idx_src, idx_dst, steps=35, obj_type=3, obj_size=1.0):
-    trajectory = np.empty((0, 9))
+    trajectory = np.empty((0, 9)) #each step has 9 dimensions #each step has 9 dimensions
+    trajectory_latent = np.empty((0,2)) #each latent step has 2 dimensions
     t = np.linspace(0, 1, steps)
-    #print("t: ", t)
-
-    print (labels[idx_src])
+    
+    
+    # print(idx_src)
+    # print (labels[idx_src])
     # print (object_type[idx_src])
     # print (object_size[idx_src])
     # print (object_type[idx_dst])
@@ -55,17 +61,149 @@ def get_trajectory(idx_src, idx_dst, steps=35, obj_type=3, obj_size=1.0):
     #     cond_size -= 0.5
     # elif object_size[idx_dst] == -1.0:
     #     cond_size -= 1.0
-
-    print (cond_size)
-    print ('\n')
+    # print('latent source',X_lat[idx_src])
+    # print('\n')
+    # print('latent end',X_lat[idx_dst])
+    # print('\n')
+    # print (cond_size)
+    # print ('\n')
     conditional = torch.cat((object_type[idx_src], cond_size), dim=-1)
+    possible_grasps, possible_lat = remove_unwanted_objects(idx_src)
+    print('    possible grasps ', len(possible_grasps), '\n')
+    #print(possible_grasps)
 
-    for j in range(steps):
-        lat = get_lininter(X_lat[idx_src], X_lat[idx_dst], t[j])
-        inter_grasp = cvae_model.decode(lat, conditional).detach()            
-        trajectory = np.vstack([trajectory, inter_grasp.numpy().astype('float64')])
 
-    return trajectory
+    # Define your starting and ending points in the latent space
+    start_latent_point = possible_lat[idx_src-possible_grasps[0][2].long()]  
+    end_latent_point = possible_lat[idx_dst-possible_grasps[0][2].long()] 
+    print("start points", start_latent_point, "\n")
+    print("end points",end_latent_point, "\n")
+    
+    current_latent_point = start_latent_point  # Initialize the current point
+    real_start_point = cvae_model.decode(current_latent_point, conditional).detach()
+
+
+    # Create a set to keep track of visited nodes, uses latent space points
+    visited_latent_points = set()
+    
+    # Define your starting and ending points in the latent space
+    start_latent_point = possible_lat[idx_src-possible_grasps[0][2].long()]  # Replace with your actual starting point
+    end_latent_point = possible_lat[idx_dst-possible_grasps[0][2].long()] # Replace with your actual ending point
+    print("start points", start_latent_point, "\n")
+    print("end points",end_latent_point, "\n")
+    
+    visited_latent_points = set()  # To keep track of visited latent points
+    current_latent_point = start_latent_point  # Initialize the current point
+    visited_latent_points.add(current_latent_point)
+    
+    path = cvae_model.decode(current_latent_point, conditional).detach()   
+    trajectory_latent = np.vstack([trajectory_latent, current_latent_point])# Initialize the path with the starting point
+    trajectory = np.vstack([trajectory, path.numpy().astype('float64')])
+    
+    
+    while not torch.equal(current_latent_point, end_latent_point):
+        # Find the nearest unvisited neighbor
+        nearest_neighbor = None
+        min_distance = 1e10
+    
+        for candidate_point in possible_lat:
+            
+            # Need to use numpy arrays to correctly use loops because tensors are not suitable for sets.....
+            #print("candidate: ",candidate_point, "\n")
+            candidate_point_np = candidate_point.numpy()
+            
+            
+            if not any(np.array_equal(candidate_point_np, point.numpy()) for point in visited_latent_points):
+                distance = calculate_distance(candidate_point, current_latent_point,conditional)
+                if distance < min_distance:
+                    min_distance = distance
+                    nearest_neighbor = candidate_point
+                    #print("new nearest neighbour: ", nearest_neighbor, "\n")
+        
+        # Update the current point and add it to the path
+        current_latent_point = nearest_neighbor
+        trajectory_latent = np.vstack([trajectory_latent, current_latent_point])
+        real_current_toadd = cvae_model.decode(current_latent_point, conditional).detach() 
+        trajectory = np.vstack([trajectory, real_current_toadd.numpy().astype('float64')])
+    
+        # Mark the current point as visited
+        visited_latent_points.add(current_latent_point)
+        
+
+    
+    print("shortest path:", trajectory, "\n")
+    print("shortest latent path:", trajectory_latent, "\n")
+
+
+# At this point, 'shortest_path' contains the path of latent points from start to end
+       
+    dist = np.zeros(len(trajectory[1]))
+    for i in range(len(trajectory[1])):
+        for j in range(len(trajectory)-1):
+            dist[i] += np.sqrt((trajectory[j][i] - trajectory[j+1][i])**2)
+    
+    
+    dist_total = np.sum(dist)
+                        
+    print("pathing distances on each dimension")
+    print(dist)
+    print("\n")
+    print("total path distance")
+    print(dist_total)
+    print("\n")
+    # print("average distance per step")
+    # print(dist_total/len(trajectory))
+    # print("\n")
+    
+    # Plot the latent space in a scatter plot
+    plt.figure(figsize=(8, 6))
+    plt.scatter(possible_lat[:, 0], possible_lat[:, 1], c='b', marker='o', s=10)
+    plt.title('2D Latent Space')
+    plt.xlabel('Latent Dimension 1')
+    plt.ylabel('Latent Dimension 2')
+    plt.plot(trajectory_latent[:, 0], trajectory_latent[:, 1], c='r', marker='o', linestyle='-')
+    plt.grid(True)
+    plt.show()
+    
+    return trajectory, dist_total
+
+# Define heuristic function (Euclidean distance)
+def heuristic(node, end_node,conditional):
+    # Calculate the estimated remaining cost in real space
+    return calculate_distance(node, end_node,conditional)
+
+def calculate_distance(candidate_point, current_latent_point,conditional):
+    
+    real_candidate = cvae_model.decode(candidate_point, conditional).detach()
+    real_current = cvae_model.decode(current_latent_point, conditional).detach()
+    
+    # Calculate the squared differences in each dimension
+    squared_diff = (real_candidate.sum() - real_current.sum()) ** 2
+    
+    # Sum the squared differences and take the square root
+    distance = np.sqrt((squared_diff))
+    
+    return distance
+
+def remove_unwanted_objects(idx_src):
+    desired_object = labels[idx_src][0]
+    print('desired object', desired_object)
+    
+    flatten_label = np.delete(labels,1,axis=1)
+    
+    unwanted_indexes = np.where(flatten_label != desired_object)
+    wanted_indexes = np.where(flatten_label == desired_object)
+    wanted_indexes = wanted_indexes[0].T.reshape(len(wanted_indexes[0]),1)
+    
+    grasps_touse = np.delete(labels,unwanted_indexes[0],axis=0)
+    grasps_touse = np.append(grasps_touse, wanted_indexes,axis=1)
+    lat_touse = np.delete(X_lat.detach().numpy(),unwanted_indexes[0],axis=0)
+    grasps_touse_tensor = torch.from_numpy(grasps_touse).float()
+    lat_touse_tensor = torch.from_numpy(lat_touse).float()
+    
+
+    
+    return grasps_touse_tensor, lat_touse_tensor
 
 args = parse_args()
 n_steps = args.steps
@@ -73,13 +211,66 @@ n_steps = args.steps
 # Load data
 grasps, labels = load_data(args.data, robot='icub')
 
+# creating different object groups depending on object type
+unique_object_types = np.unique(labels[:,0])
+
+grouped_arrays = {}
+
+for obj_type in unique_object_types:
+    indices = np.where(labels[:,0] == obj_type)[0]
+    
+    grouped_grasps = grasps[indices]
+    
+    grouped_arrays[obj_type] = grouped_grasps
+    
+pairwise_distances = {}
+
+for obj_type, grouped_grasps in grouped_arrays.items():
+    pairwise_dist = pdist(grouped_grasps)
+    
+    distance_matrix = squareform(pairwise_dist)
+    
+    pairwise_distances[obj_type] = distance_matrix
+    
+#trying a small value at the start, to have it sensible to similarities
+sigma = 75
+
+riemannian_matrices = {}
+
+for obj_type, dist in pairwise_distances.items():
+    distance_matrix = np.exp(-dist**2 / (2 * sigma**2))
+    
+    riemannian_matrices[obj_type] = distance_matrix
+    
+    
+total_rows = sum(matrix.shape[0] for matrix in riemannian_matrices.values())
+
+#a simple PCA encoding to test, since we need to encode the riemannian metric dictionary to match the size of grasps
+basic_pca = PCA(n_components=9)
+
+result_array = np.empty((total_rows, 9), dtype=np.float64)
+
+current_row = 0
+
+for obj_type, matrix in riemannian_matrices.items():
+    #have to use PCA to encode the metric dictionary, since it has 536x N size, 
+    #where N depends on how many points of one object type there is
+    encoded_matrix = basic_pca.fit_transform(matrix)
+    
+    num_rows = encoded_matrix.shape[0]
+    
+    result_array [current_row : current_row + num_rows, :] = encoded_matrix
+    
+    current_row += num_rows
+
 grasps, grasp_type, object_type, object_size = annotate_grasps(grasps, labels)
 
 # indices_map = list(np.arange(grasps.shape[0])[idxs_n])
 
 # To torch tensors
 grasps = torch.from_numpy(grasps).float()
-grasps_tosee = grasps.numpy()
+encoded_metrics = torch.from_numpy(result_array).float()
+grasps_toread = grasps.detach().numpy()
 object_size = torch.from_numpy(object_size).float().unsqueeze(-1)
 object_type = torch.from_numpy(object_type).float()
 # One hot encoding
@@ -88,25 +279,21 @@ object_type = one_hot(object_type.long(), class_size=3)
 y = torch.cat((object_type, object_size), dim=-1)
 
 cvae_model = get_CVAE(args.model) 
-recon_grasps, X_lat, _ = cvae_model(grasps, y)
+recon_grasps, X_lat, _ = cvae_model(grasps, y, encoded_metrics)
 
-trajectories = np.empty((0, n_steps, 9))
+X_lat_toread = X_lat.detach().numpy()
 
+
+trajectories = list()
 
 pairs = np.load('data/final_pairs.npy')
-traj_cost = np.empty(len(pairs))
 print (f'Generating {len(pairs)} pairs!')
 # pairs = np.load('pairs_test.npy')
-pair_index = 0
 
 for p in pairs:
-    #print("p:", p)
-    traj = get_trajectory(p[0], p[1], n_steps)
-    #print("traj: ", traj)
-    trajectories = np.vstack([trajectories, np.expand_dims(traj, axis=0)])
-    traj_cost[pair_index] = np.sum(traj)
-    pair_index += 1
-
+    traj, total_dist = get_trajectory(p[0], p[1])
+    trajectories.append((traj,total_dist))
+    
 grasp_idxs = np.asarray(pairs)
 model_name = args.model.split('/')[-1]
 save_trajectories(grasp_idxs, trajectories, model_name, n_steps,
