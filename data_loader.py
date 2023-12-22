@@ -205,7 +205,7 @@ def get_grasps_with_object_sizes_and_types_idxs(grasps, labels):
     print ("Loaded ", grasps.shape[0], " grasps!")
     return grasps, grasp_type, object_type, object_size, idxs
 
-def load_data(direc, robot='icub'):
+def load_data(direc, robot='shadow'):
     """
     Load dataset of grasp postures and corresponding grasp types
     from mat files.
@@ -269,17 +269,17 @@ def select_grasps(grasps, labels, object_configuration):
 def annotate_grasps(grasps, labels):
     y = labels.copy()
 
-    # idxs_big = np.isin(y[:, 0], [1, 4, 5, 8, 12, 14, 16, 20])
+    idxs_big = np.isin(y[:, 0], [1, 4, 5, 12, 14, 16, 20])
     # idxs_big = np.isin(y[:, 0], [1, 4, 8, 12, 14, 16, 20])
-    idxs_big = np.isin(y[:, 0], [1, 4, 12, 14, 20])
+    # idxs_big = np.isin(y[:, 0], [1, 4, 12, 14, 20]) original one
     y[idxs_big, 0] = 1.0
     # idxs_medium = np.isin(y[:, 0], [2, 5, 7, 19])
-    # idxs_medium = np.isin(y[:, 0], [2, 6, 13, 19])
-    idxs_medium = np.isin(y[:, 0], [2, 5, 8, 16, 13, 19])
+    idxs_medium = np.isin(y[:, 0], [2, 6, 7, 18])
+    # idxs_medium = np.isin(y[:, 0], [2, 5, 8, 16, 13, 19]) original one
     y[idxs_medium, 0] = 0
     # idxs_small = np.isin(y[:, 0], [3, 9, 10, 11, 13, 15, 17, 18])
-    # idxs_small = np.isin(y[:, 0], [3, 7, 9, 10, 11, 15, 17, 18])
-    idxs_small = np.isin(y[:, 0], [3, 6, 7, 9, 10, 11, 15, 17, 18])
+    idxs_small = np.isin(y[:, 0], [3, 8, 9, 10, 11, 13, 15, 17, 19])
+    # idxs_small = np.isin(y[:, 0], [3, 6, 7, 9, 10, 11, 15, 17, 18]) original one
     y[idxs_small, 0] = -1.0
 
     object_type = labels[:, 0].copy()
